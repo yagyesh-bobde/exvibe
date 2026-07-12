@@ -23,6 +23,31 @@ export interface HealthResponse {
 
 export type DataResponse = DraftBundle | { empty: true; message: string };
 
+/**
+ * The server returns the full dashboard_data.json (drafts nested under `drafts`,
+ * without a per-draft `kind`). Normalize it to the flat DraftBundle the panel
+ * renders, tagging each draft with its kind.
+ */
+function normalizeData(raw: unknown): DataResponse {
+  if (raw && typeof raw === 'object' && (raw as { empty?: unknown }).empty === true) {
+    const r = raw as { message?: string };
+    return { empty: true, message: r.message ?? 'no drafts yet — hit refresh' };
+  }
+  const r = (raw ?? {}) as {
+    generated_at?: string;
+    drafts?: { posts?: unknown[]; replies?: unknown[]; quotes?: unknown[] };
+  };
+  const d = r.drafts ?? {};
+  const tag = (items: unknown[] | undefined, kind: DraftKind): Draft[] =>
+    (items ?? []).map((it) => ({ ...(it as Record<string, unknown>), kind }) as Draft);
+  return {
+    generated_at: r.generated_at ?? '',
+    posts: tag(d.posts, 'post'),
+    replies: tag(d.replies, 'reply'),
+    quotes: tag(d.quotes, 'quote'),
+  };
+}
+
 export type FeedKind = 'for-you' | 'trending';
 
 export interface FeedResponse {
@@ -121,12 +146,12 @@ export class ServerClient {
     return this.request<HealthResponse>('/healthz');
   }
 
-  getData(): Promise<DataResponse> {
-    return this.request<DataResponse>('/data');
+  async getData(): Promise<DataResponse> {
+    return normalizeData(await this.request<unknown>('/data'));
   }
 
-  refresh(): Promise<DataResponse> {
-    return this.request<DataResponse>('/refresh', { method: 'POST' });
+  async refresh(): Promise<DataResponse> {
+    return normalizeData(await this.request<unknown>('/refresh', { method: 'POST' }));
   }
 
   getSignature(): Promise<Signature> {
@@ -137,11 +162,13 @@ export class ServerClient {
     return this.request<FeedResponse>(`/feed?kind=${kind}&page=${page}`);
   }
 
-  regenerate(req: RegenerateRequest): Promise<Draft> {
-    return this.request<Draft>('/draft/regenerate', {
+  async regenerate(req: RegenerateRequest): Promise<Draft> {
+    const raw = await this.request<Record<string, unknown>>('/draft/regenerate', {
       method: 'POST',
       body: JSON.stringify(req),
     });
+    // Server draft omits `kind`; carry it over from the request.
+    return { ...raw, kind: req.kind } as Draft;
   }
 
   removeDraft(req: RemoveDraftRequest): Promise<{ ok: boolean }> {
