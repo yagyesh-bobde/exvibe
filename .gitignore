@@ -1,0 +1,5 @@
+firebase-debug.log
+node_modules/
+dist/
+server/data/
+.DS_Store
