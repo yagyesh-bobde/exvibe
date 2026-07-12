@@ -10,8 +10,8 @@
 
 import type { QueueItem } from '../../shared/models';
 
-/** Contract with the service worker: the queue lives under this key. */
-export const QUEUE_STORAGE_KEY = 'exvibe.queue';
+/** Contract with the service worker (scheduler.ts): the queue lives under this key. */
+export const QUEUE_STORAGE_KEY = 'exvibe_queue';
 
 const QUEUE_MIN_LEAD_MS = 60_000;
 const QUEUE_CADENCE_MS = 3 * 3_600_000;
