@@ -85,11 +85,21 @@ export async function typeIntoComposer(text: string): Promise<void> {
   focusComposer(box);
   await sleep(rand(150, 400)); // settle after focus, like a human finding the caret
 
-  const ack = await sendToBackground({ type: 'CDP_INSERT_TEXT', text });
+  const ack = await sendToBackground({
+    type: 'CDP_INSERT_TEXT',
+    text,
+    focus: centerOf(box),
+  });
   if (!isCdpAck(ack) || !ack.ok) {
     const reason = isCdpAck(ack) ? (ack.error ?? 'unknown') : 'no ack from background';
     throw new Error(`trusted typing failed: ${reason}`);
   }
+}
+
+/** Viewport-relative center of an element, for a trusted CDP click. */
+function centerOf(el: Element): { x: number; y: number } {
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 
 /** Ask the background to detach the debugger from this tab (drops the infobar). */
@@ -155,7 +165,11 @@ export async function postCurrent(): Promise<PostConfirmation> {
   const box = scope.querySelector<HTMLElement>(X_SELECTORS.tweetTextareaPrefix);
   humanHover(btn);
   await sleep(rand(80, 250));
-  btn.click();
+  // Prefer a trusted CDP click (debugger is still attached from typing); fall
+  // back to a plain DOM click if the background can't service it.
+  const target = centerOf(btn);
+  const ack = await sendToBackground({ type: 'CDP_CLICK', x: target.x, y: target.y });
+  if (!isCdpAck(ack) || !ack.ok) btn.click();
 
   try {
     return await Promise.race([confirmViaToast(), confirmViaComposerSettled(box, btn)]);

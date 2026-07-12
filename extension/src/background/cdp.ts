@@ -51,14 +51,53 @@ export async function cdpDetach(tabId: number): Promise<void> {
   }
 }
 
-/**
- * Type `text` into the tab's focused element as trusted input, with human
- * cadence (per-character 40–150 ms jitter + occasional thinking pauses).
- * Newlines go in as a real Enter key event (Draft.js inserts a soft break;
- * plain Enter does not submit — only Cmd/Ctrl+Enter does).
- */
-export async function cdpInsertText(tabId: number, text: string): Promise<void> {
+/** Public trusted click (attaches if needed), e.g. to press the Post button. */
+export async function cdpClickAt(tabId: number, x: number, y: number): Promise<void> {
   await ensureAttached(tabId);
+  await chrome.debugger.sendCommand({ tabId }, 'Page.bringToFront').catch(() => undefined);
+  await cdpClick(tabId, x, y);
+}
+
+/** Trusted mouse click at viewport CSS coordinates, to focus an element. */
+async function cdpClick(tabId: number, x: number, y: number): Promise<void> {
+  const base = { x, y, button: 'left' as const, clickCount: 1 };
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+    ...base,
+    type: 'mousePressed',
+  });
+  await sleep(rand(30, 80));
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+    ...base,
+    type: 'mouseReleased',
+  });
+}
+
+/**
+ * Type `text` into the composer as trusted input, with human cadence
+ * (per-character 40–150 ms jitter + occasional thinking pauses). Newlines go in
+ * as a real Enter key event (Draft.js inserts a soft break; plain Enter does
+ * not submit — only Cmd/Ctrl+Enter does).
+ *
+ * When `focus` is given, the page is brought to front and a trusted click lands
+ * on the composer first so Input.insertText has a focused element to target
+ * (a programmatic element.focus() does not stick in an unfocused WebContents).
+ */
+export async function cdpInsertText(
+  tabId: number,
+  text: string,
+  focus?: { x: number; y: number },
+): Promise<void> {
+  await ensureAttached(tabId);
+  // Focus the page's renderer, then trust-click the composer to focus it.
+  try {
+    await chrome.debugger.sendCommand({ tabId }, 'Page.bringToFront');
+  } catch {
+    // Page domain not available on this target — best effort.
+  }
+  if (focus) {
+    await cdpClick(tabId, focus.x, focus.y);
+    await sleep(rand(120, 300));
+  }
   for (const ch of Array.from(text)) {
     if (ch === '\n') {
       await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {

@@ -6,7 +6,7 @@
 
 import type { CdpAckMsg, Msg, PostResultMsg } from '../shared/messages';
 import type { QueueItem } from '../shared/models';
-import { cdpDetach, cdpInsertText } from './cdp';
+import { cdpClickAt, cdpDetach, cdpInsertText } from './cdp';
 import { postNow } from './poster';
 import { cancel, enqueue, listPending, listQueue, schedule } from './scheduler';
 
@@ -48,7 +48,21 @@ chrome.runtime.onMessage.addListener(
           sendResponse({ type: 'CDP_ACK', ok: false, error: 'no sender tab' } satisfies CdpAckMsg);
           return false;
         }
-        cdpInsertText(tabId, message.text).then(
+        cdpInsertText(tabId, message.text, message.focus).then(
+          () => sendResponse({ type: 'CDP_ACK', ok: true } satisfies CdpAckMsg),
+          (err: unknown) =>
+            sendResponse({ type: 'CDP_ACK', ok: false, error: errorMessage(err) } satisfies CdpAckMsg),
+        );
+        return true;
+      }
+
+      case 'CDP_CLICK': {
+        const tabId = sender.tab?.id;
+        if (tabId === undefined) {
+          sendResponse({ type: 'CDP_ACK', ok: false, error: 'no sender tab' } satisfies CdpAckMsg);
+          return false;
+        }
+        cdpClickAt(tabId, message.x, message.y).then(
           () => sendResponse({ type: 'CDP_ACK', ok: true } satisfies CdpAckMsg),
           (err: unknown) =>
             sendResponse({ type: 'CDP_ACK', ok: false, error: errorMessage(err) } satisfies CdpAckMsg),

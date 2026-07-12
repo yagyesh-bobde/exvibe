@@ -80,6 +80,20 @@ export interface TogglePanelMsg {
 export interface CdpInsertTextMsg {
   type: 'CDP_INSERT_TEXT';
   text: string;
+  /**
+   * Viewport-relative center of the composer. The background brings the page to
+   * front and dispatches a TRUSTED mouse click here first — a programmatic
+   * element.focus() does not take in an unfocused WebContents, so without a
+   * trusted click Input.insertText has no focused element to land in.
+   */
+  focus?: { x: number; y: number };
+}
+
+/** Content script -> background: trusted click at viewport coords (e.g. the Post button). */
+export interface CdpClickMsg {
+  type: 'CDP_CLICK';
+  x: number;
+  y: number;
 }
 
 /** Content script -> background: detach the debugger from this tab (drops the infobar). */
@@ -106,6 +120,7 @@ export type Msg =
   | QueueUpdatedMsg
   | TogglePanelMsg
   | CdpInsertTextMsg
+  | CdpClickMsg
   | CdpDetachMsg
   | CdpAckMsg;
 
