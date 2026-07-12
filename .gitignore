@@ -3,3 +3,6 @@ node_modules/
 dist/
 server/data/
 .DS_Store
+
+# local test artifacts / screenshots
+artifacts/
