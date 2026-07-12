@@ -82,27 +82,49 @@ function waitForTabComplete(tabId: number, timeoutMs = TAB_LOAD_TIMEOUT_MS): Pro
   });
 }
 
+/** One PING round-trip; true if a content-script listener answered. */
+async function pingContentScript(tabId: number): Promise<boolean> {
+  try {
+    const ping: Msg = { type: 'PING' };
+    await sendToTab(tabId, ping);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Poll the content script with PING until it answers (any resolution means the
- * receiving end exists — a rejected sendMessage means it is not injected yet).
+ * Inject the manifest-declared content script into a tab on demand. Needed
+ * because reloading the extension orphans content scripts in already-open tabs,
+ * and Chrome will not re-inject them without a page reload. Idempotent enough:
+ * we only call this after a failed PING, so there is no live listener to double.
  */
-async function waitForContentReady(
+async function injectContentScript(tabId: number): Promise<void> {
+  const declared = chrome.runtime.getManifest().content_scripts?.[0]?.js ?? [];
+  if (declared.length === 0) return;
+  await chrome.scripting.executeScript({ target: { tabId }, files: declared });
+}
+
+/**
+ * Ensure a live content script in the tab: ping, and if nothing answers, inject
+ * it and poll until it comes up (or time out).
+ */
+async function ensureContentReady(
   tabId: number,
   timeoutMs = CONTENT_READY_TIMEOUT_MS,
 ): Promise<void> {
+  if (await pingContentScript(tabId)) return;
+  try {
+    await injectContentScript(tabId);
+  } catch (err) {
+    throw new Error(`could not inject content script into tab ${tabId}: ${errorMessage(err)}`);
+  }
   const deadline = Date.now() + timeoutMs;
-  let lastError = 'no response';
   while (Date.now() < deadline) {
-    try {
-      const ping: Msg = { type: 'PING' };
-      await sendToTab(tabId, ping);
-      return; // resolved -> a listener exists in the tab
-    } catch (err) {
-      lastError = errorMessage(err);
-    }
+    if (await pingContentScript(tabId)) return;
     await sleep(CONTENT_READY_POLL_MS);
   }
-  throw new Error(`content script in tab ${tabId} never became ready: ${lastError}`);
+  throw new Error(`content script in tab ${tabId} never became ready after injection`);
 }
 
 async function focusTab(tab: chrome.tabs.Tab): Promise<void> {
@@ -184,7 +206,7 @@ export async function postNow(
   try {
     const tab = await findOrCreateXTab();
     await focusTab(tab);
-    await waitForContentReady(tab.id);
+    await ensureContentReady(tab.id);
     const result = await sendDoPost(tab.id, payload);
     if (result.ok) {
       await recordSuccess(payload, result, source);
