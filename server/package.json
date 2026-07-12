@@ -1,0 +1,14 @@
+{
+  "name": "exvibe-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "~5.5.4"
+  }
+}

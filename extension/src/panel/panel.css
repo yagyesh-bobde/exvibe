@@ -1,0 +1,149 @@
+/*
+ * exvibe panel — "instrument rail" theme.
+ * Monospace is the UI voice (labels, counters, countdowns); draft text is set
+ * in a serif reading face so the drafts read as the artifact, not the chrome.
+ */
+
+:root {
+  --bg: #0a0c0f;
+  --panel: #101419;
+  --panel-2: #151a20;
+  --line: rgba(226, 235, 244, 0.08);
+  --line-strong: rgba(226, 235, 244, 0.16);
+  --text: #dfe6ed;
+  --muted: #7d8894;
+  --dim: #4c545e;
+  --accent: #3ecf8e;
+  --accent-dim: rgba(62, 207, 142, 0.14);
+  --amber: #e8a33d;
+  --red: #f0564a;
+  --red-dim: rgba(240, 86, 74, 0.12);
+  --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  --font-read: 'Iowan Old Style', Charter, Georgia, 'Times New Roman', serif;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(62, 207, 142, 0.28);
+}
+
+*:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(226, 235, 244, 0.1);
+  border-radius: 4px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(226, 235, 244, 0.2);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Atmosphere: faint accent glow behind the top bar. */
+.ev-atmosphere {
+  background:
+    radial-gradient(120% 60px at 50% 0%, rgba(62, 207, 142, 0.05), transparent 70%),
+    var(--bg);
+}
+
+@keyframes ev-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.ev-toast {
+  animation: ev-toast-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes ev-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(62, 207, 142, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 5px rgba(62, 207, 142, 0);
+  }
+}
+.ev-dot-live {
+  animation: ev-pulse 2.4s ease-out infinite;
+}
+
+@keyframes ev-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ev-spin {
+  animation: ev-spin 0.9s linear infinite;
+}
+
+@keyframes ev-shimmer {
+  0% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.45;
+  }
+}
+.ev-shimmer {
+  animation: ev-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes ev-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.ev-card {
+  animation: ev-card-in 160ms ease-out;
+}
+
+/* Draft body text: the reading face. */
+.ev-read {
+  font-family: var(--font-read);
+  font-size: 14.5px;
+  line-height: 1.55;
+  letter-spacing: 0.001em;
+}
+
+/* Uppercase mono microlabel used across the panel. */
+.ev-label {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+textarea {
+  scrollbar-width: thin;
+}
