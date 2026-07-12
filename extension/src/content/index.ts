@@ -14,6 +14,7 @@ import {
   composePost,
   composeQuote,
   composeReply,
+  detachDebugger,
   isOnPermalink,
   takePendingJob,
 } from './emulate';
@@ -38,6 +39,10 @@ async function handleDoPost(payload: PostPayload): Promise<PostResultMsg> {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     };
+  } finally {
+    // Drop the debugger infobar as soon as the flow ends (success or fail).
+    // A reply that navigated away runs its detach in the resumed instance.
+    await detachDebugger();
   }
 }
 
@@ -90,6 +95,8 @@ async function resumePendingJob(): Promise<void> {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     });
+  } finally {
+    await detachDebugger();
   }
 }
 

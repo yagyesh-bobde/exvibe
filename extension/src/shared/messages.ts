@@ -70,6 +70,30 @@ export interface TogglePanelMsg {
   type: 'TOGGLE_PANEL';
 }
 
+/**
+ * Content script -> background: insert `text` into the currently focused
+ * composer as TRUSTED input via chrome.debugger + Input.insertText. DOM
+ * insertion (execCommand/paste) no-ops when the x.com tab is not the focused
+ * document — which it never is when driven from the side panel — so trusted
+ * CDP input is the only path that registers. Background replies with CdpAckMsg.
+ */
+export interface CdpInsertTextMsg {
+  type: 'CDP_INSERT_TEXT';
+  text: string;
+}
+
+/** Content script -> background: detach the debugger from this tab (drops the infobar). */
+export interface CdpDetachMsg {
+  type: 'CDP_DETACH';
+}
+
+/** Background -> content script: outcome of a CDP typing/detach request. */
+export interface CdpAckMsg {
+  type: 'CDP_ACK';
+  ok: boolean;
+  error?: string;
+}
+
 export type Msg =
   | PostNowMsg
   | DoPostMsg
@@ -80,7 +104,10 @@ export type Msg =
   | PingMsg
   | PongMsg
   | QueueUpdatedMsg
-  | TogglePanelMsg;
+  | TogglePanelMsg
+  | CdpInsertTextMsg
+  | CdpDetachMsg
+  | CdpAckMsg;
 
 export type MsgType = Msg['type'];
 

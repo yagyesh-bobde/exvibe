@@ -5,7 +5,7 @@ export default defineManifest({
   name: 'exvibe',
   description: 'X growth cockpit — human-emulated posting, replying, and voice-learned drafts.',
   version: '0.1.0',
-  permissions: ['sidePanel', 'tabs', 'scripting', 'alarms', 'storage'],
+  permissions: ['sidePanel', 'tabs', 'scripting', 'alarms', 'storage', 'debugger'],
   host_permissions: [
     'https://x.com/*',
     'https://twitter.com/*',

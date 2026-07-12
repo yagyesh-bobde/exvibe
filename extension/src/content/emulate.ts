@@ -9,29 +9,16 @@
  */
 
 import { X_SELECTORS } from '../shared/selectors';
+import { sendToBackground } from '../shared/messages';
+import type { CdpAckMsg } from '../shared/messages';
 import { rand, selectorMiss, sleep, waitFor } from './dom';
 
-/**
- * SEAM — trusted-input fallback (X-DOM-BRIEF section 6).
- *
- * `execCommand('insertText')` + `.click()` produce isTrusted:false events. X
- * does not currently gate on isTrusted, but if it ever hardens, the only way
- * to produce trusted events from an extension is `chrome.debugger` +
- * `Input.insertText` / `Input.dispatchKeyEvent` (cost: a persistent yellow
- * "…is debugging this browser" infobar; only one debuggee attach at a time;
- * detach when idle).
- *
- * Wiring plan when the time comes: `chrome.debugger` is NOT available in
- * content scripts, so `typeViaDebugger` must message the background service
- * worker (new DEBUGGER_TYPE message type in shared/messages.ts), which
- * attaches to this tab, replays the text as trusted input, and detaches.
- * Flip USE_DEBUGGER (or make it a stored setting) to route typing through it.
- */
-export const USE_DEBUGGER: boolean = false;
-
-async function typeViaDebugger(_text: string): Promise<void> {
-  // Stub only — see the seam comment above. Deliberately not implemented yet.
-  throw new Error('typeViaDebugger is an unimplemented seam (USE_DEBUGGER)');
+function isCdpAck(value: unknown): value is CdpAckMsg {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { type?: unknown }).type === 'CDP_ACK'
+  );
 }
 
 /**
@@ -78,21 +65,17 @@ function humanHover(el: HTMLElement): void {
 }
 
 /**
- * Type `text` into the active composer with human cadence: per-character
- * execCommand inserts at 40–150ms jitter, occasional 200–600ms "thinking"
- * pauses, insertParagraph for newlines (insertText '\n' is dropped by Draft),
- * Array.from for emoji safety. Falls back to synthetic paste if execCommand
- * stops registering.
+ * Type `text` into the active composer as TRUSTED input.
+ *
+ * DOM insertion (execCommand/paste) no-ops when the x.com tab is not the
+ * focused document — which it never is when a post is driven from the side
+ * panel (verified live: button stays disabled). So we focus the composer here
+ * (making it document.activeElement) and hand the actual keystrokes to the
+ * background service worker, which types them via chrome.debugger's
+ * Input.insertText — trusted, focus-independent, human-cadenced. See
+ * background/cdp.ts.
  */
-export async function typeIntoComposer(
-  text: string,
-  opts: { minDelayMs?: number; maxDelayMs?: number } = {},
-): Promise<void> {
-  const { minDelayMs = 40, maxDelayMs = 150 } = opts;
-  if (USE_DEBUGGER) {
-    await typeViaDebugger(text);
-    return;
-  }
+export async function typeIntoComposer(text: string): Promise<void> {
   await waitFor(X_SELECTORS.tweetTextareaPrefix, 10_000);
   const box = queryComposer();
   if (!box) {
@@ -102,23 +85,19 @@ export async function typeIntoComposer(
   focusComposer(box);
   await sleep(rand(150, 400)); // settle after focus, like a human finding the caret
 
-  const chars = Array.from(text); // code-point iteration => emoji-safe
-  let typed = 0;
-  for (const ch of chars) {
-    const ok =
-      ch === '\n'
-        ? document.execCommand('insertParagraph')
-        : document.execCommand('insertText', false, ch);
-    if (!ok) {
-      console.warn(
-        '[exvibe] execCommand insert stopped registering — pasting the remaining text instead',
-      );
-      pasteIntoComposer(chars.slice(typed).join(''), box);
-      return;
-    }
-    typed += 1;
-    await sleep(rand(minDelayMs, maxDelayMs));
-    if (Math.random() < 0.07) await sleep(rand(200, 600)); // occasional thinking pause
+  const ack = await sendToBackground({ type: 'CDP_INSERT_TEXT', text });
+  if (!isCdpAck(ack) || !ack.ok) {
+    const reason = isCdpAck(ack) ? (ack.error ?? 'unknown') : 'no ack from background';
+    throw new Error(`trusted typing failed: ${reason}`);
+  }
+}
+
+/** Ask the background to detach the debugger from this tab (drops the infobar). */
+export async function detachDebugger(): Promise<void> {
+  try {
+    await sendToBackground({ type: 'CDP_DETACH' });
+  } catch {
+    // Background asleep or already detached — nothing to do.
   }
 }
 

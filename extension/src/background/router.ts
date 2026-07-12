@@ -4,8 +4,9 @@
  * scheduler. Async handlers return true to keep sendResponse alive.
  */
 
-import type { Msg, PostResultMsg } from '../shared/messages';
+import type { CdpAckMsg, Msg, PostResultMsg } from '../shared/messages';
 import type { QueueItem } from '../shared/models';
+import { cdpDetach, cdpInsertText } from './cdp';
 import { postNow } from './poster';
 import { cancel, enqueue, listPending, listQueue, schedule } from './scheduler';
 
@@ -33,12 +34,39 @@ function failedResult(err: unknown): PostResultMsg {
 }
 
 chrome.runtime.onMessage.addListener(
-  (message: RouterMsg, _sender, sendResponse: (response: unknown) => void) => {
+  (message: RouterMsg, sender, sendResponse: (response: unknown) => void) => {
     switch (message.type) {
       case 'PING': {
         const pong: Msg = { type: 'PONG' };
         sendResponse(pong);
         return false;
+      }
+
+      case 'CDP_INSERT_TEXT': {
+        const tabId = sender.tab?.id;
+        if (tabId === undefined) {
+          sendResponse({ type: 'CDP_ACK', ok: false, error: 'no sender tab' } satisfies CdpAckMsg);
+          return false;
+        }
+        cdpInsertText(tabId, message.text).then(
+          () => sendResponse({ type: 'CDP_ACK', ok: true } satisfies CdpAckMsg),
+          (err: unknown) =>
+            sendResponse({ type: 'CDP_ACK', ok: false, error: errorMessage(err) } satisfies CdpAckMsg),
+        );
+        return true;
+      }
+
+      case 'CDP_DETACH': {
+        const tabId = sender.tab?.id;
+        if (tabId === undefined) {
+          sendResponse({ type: 'CDP_ACK', ok: true } satisfies CdpAckMsg);
+          return false;
+        }
+        cdpDetach(tabId).then(
+          () => sendResponse({ type: 'CDP_ACK', ok: true } satisfies CdpAckMsg),
+          () => sendResponse({ type: 'CDP_ACK', ok: true } satisfies CdpAckMsg),
+        );
+        return true;
       }
 
       case 'POST_NOW': {
