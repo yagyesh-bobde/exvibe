@@ -65,15 +65,14 @@ function humanHover(el: HTMLElement): void {
 }
 
 /**
- * Type `text` into the active composer as TRUSTED input.
+ * Insert `text` into the active composer as TRUSTED input.
  *
  * DOM insertion (execCommand/paste) no-ops when the x.com tab is not the
  * focused document — which it never is when a post is driven from the side
  * panel (verified live: button stays disabled). So we focus the composer here
- * (making it document.activeElement) and hand the actual keystrokes to the
- * background service worker, which types them via chrome.debugger's
- * Input.insertText — trusted, focus-independent, human-cadenced. See
- * background/cdp.ts.
+ * (making it document.activeElement) and hand the text to the background
+ * service worker, which pastes it via chrome.debugger's Input.insertText —
+ * trusted and focus-independent. See background/cdp.ts.
  */
 export async function typeIntoComposer(text: string): Promise<void> {
   await waitFor(X_SELECTORS.tweetTextareaPrefix, 10_000);
@@ -143,7 +142,7 @@ export interface PostConfirmation {
  * emptied and the button returned to aria-disabled.
  */
 export async function postCurrent(): Promise<PostConfirmation> {
-  await sleep(rand(300, 1200)); // human gap: re-read the draft before reaching for the button
+  await sleep(rand(2000, 4000)); // human gap: re-read the draft before reaching for the button
 
   const scope = composerScope();
   const btn =
@@ -287,7 +286,7 @@ export function takePendingJob(): PendingJob | null {
 
 /**
  * Post flow: ensure a composer is open (existing inline/modal box, else click
- * the left-rail new-post button), type with human cadence, send, confirm.
+ * the left-rail new-post button), paste the text, pause, send, confirm.
  */
 export async function composePost(text: string): Promise<PostConfirmation> {
   if (!queryComposer()) {

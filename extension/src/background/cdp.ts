@@ -73,10 +73,10 @@ async function cdpClick(tabId: number, x: number, y: number): Promise<void> {
 }
 
 /**
- * Type `text` into the composer as trusted input, with human cadence
- * (per-character 40–150 ms jitter + occasional thinking pauses). Newlines go in
- * as a real Enter key event (Draft.js inserts a soft break; plain Enter does
- * not submit — only Cmd/Ctrl+Enter does).
+ * Insert `text` into the composer as trusted input, like a paste: each line
+ * goes in as one Input.insertText call. Newlines still go in as a real Enter
+ * key event — Draft.js ignores '\n' inside insertText but inserts a soft break
+ * on Enter (plain Enter does not submit; only Cmd/Ctrl+Enter does).
  *
  * When `focus` is given, the page is brought to front and a trusted click lands
  * on the composer first so Input.insertText has a focused element to target
@@ -98,8 +98,13 @@ export async function cdpInsertText(
     await cdpClick(tabId, focus.x, focus.y);
     await sleep(rand(120, 300));
   }
-  for (const ch of Array.from(text)) {
-    if (ch === '\n') {
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line) {
+      await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: line });
+    }
+    if (i < lines.length - 1) {
       await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
         type: 'keyDown',
         key: 'Enter',
@@ -114,10 +119,7 @@ export async function cdpInsertText(
         windowsVirtualKeyCode: 13,
         nativeVirtualKeyCode: 13,
       });
-    } else {
-      await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: ch });
+      await sleep(rand(60, 150));
     }
-    await sleep(rand(40, 150));
-    if (Math.random() < 0.07) await sleep(rand(200, 600)); // occasional "thinking" pause
   }
 }
