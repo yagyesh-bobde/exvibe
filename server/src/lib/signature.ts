@@ -21,7 +21,10 @@ export interface NormalizedTweet {
   likes: number;
   rts: number;
   replies: number;
+  /** Human-facing local wall-clock string (for display; may lack a timezone). */
   time: string;
+  /** Unambiguous ISO-8601 creation timestamp (UTC offset present) — used for age math. */
+  createdAtISO: string;
 }
 
 export interface ScoredTweet extends NormalizedTweet {
@@ -118,6 +121,11 @@ export function normalizeTweet(t: unknown): NormalizedTweet | null {
   const replies = metrics ? num(metrics['replies']) : num(rec['replies']) || num(rec['reply_count']);
 
   const timeStr = str(rec['createdAtLocal']) || str(rec['time']) || str(rec['created_at']);
+  // Prefer an offset-bearing timestamp so age math is timezone-safe. The local
+  // string (createdAtLocal) has no offset and JavaScriptCore won't parse it
+  // reliably, so it's the last resort.
+  const isoStr =
+    str(rec['createdAtISO']) || str(rec['createdAt']) || str(rec['created_at']) || timeStr;
 
   return {
     id: str(rec['id']) || str(rec['rest_id']),
@@ -127,6 +135,7 @@ export function normalizeTweet(t: unknown): NormalizedTweet | null {
     rts: rts || 0,
     replies: replies || 0,
     time: timeStr,
+    createdAtISO: isoStr,
   };
 }
 

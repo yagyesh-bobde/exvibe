@@ -53,14 +53,18 @@ export function twitterHandle(): string {
   return (envForTwitter()['TWITTER_HANDLE'] ?? '').replace(/^@+/, '').trim();
 }
 
-/** claude --agent name for drafting (DASHBOARD_AGENT, default "voice"). */
+/** claude --agent name for drafting (DASHBOARD_AGENT, falling back to ~/.agent-reach/env.sh, then "voice"). */
 export function dashboardAgent(): string {
-  return (process.env['DASHBOARD_AGENT'] ?? 'voice').trim() || 'voice';
+  const direct = (process.env['DASHBOARD_AGENT'] ?? '').trim();
+  if (direct) return direct;
+  return (envForTwitter()['DASHBOARD_AGENT'] ?? '').trim() || 'voice';
 }
 
 /** Path to the agent persona markdown (DASHBOARD_AGENT_MD or ~/.claude/agents/<agent>.md). */
 export function dashboardAgentMd(): string {
-  const fromEnv = (process.env['DASHBOARD_AGENT_MD'] ?? '').trim();
+  const fromEnv =
+    (process.env['DASHBOARD_AGENT_MD'] ?? '').trim() ||
+    (envForTwitter()['DASHBOARD_AGENT_MD'] ?? '').trim();
   if (fromEnv) return fromEnv;
   return join(homedir(), '.claude', 'agents', `${dashboardAgent()}.md`);
 }
@@ -190,7 +194,12 @@ export async function twitter(args: string[], timeoutMs = 60_000): Promise<unkno
   } catch {
     return null;
   }
-  if (res.timedOut) return null;
+  if (res.timedOut) {
+    console.error(
+      `[pipeline] twitter ${args.join(' ')} timed out after ${Math.round(timeoutMs / 1000)}s`,
+    );
+    return null;
+  }
   if (res.code !== 0) {
     console.error(
       `[pipeline] twitter ${args.join(' ')} failed: ${res.stderr.trim().slice(0, 200)}`,
@@ -198,7 +207,10 @@ export async function twitter(args: string[], timeoutMs = 60_000): Promise<unkno
     return null;
   }
   const txt = res.stdout.trim();
-  if (!txt) return null;
+  if (!txt) {
+    console.error(`[pipeline] twitter ${args.join(' ')} produced no output`);
+    return null;
+  }
   try {
     return JSON.parse(txt) as unknown;
   } catch {
@@ -207,9 +219,12 @@ export async function twitter(args: string[], timeoutMs = 60_000): Promise<unkno
       try {
         return JSON.parse(m[1]) as unknown;
       } catch {
-        return null;
+        // fall through to the log below
       }
     }
+    console.error(
+      `[pipeline] twitter ${args.join(' ')} output unparseable: ${txt.slice(0, 200)}`,
+    );
     return null;
   }
 }

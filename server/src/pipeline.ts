@@ -52,6 +52,10 @@ const REPLY_BATCH = 20;
 const QUOTE_BATCH = 20;
 // Concurrent claude processes. Each is heavy; keep this modest.
 const MAX_DRAFT_WORKERS = Number(process.env['DASHBOARD_DRAFT_WORKERS'] ?? '') || 5;
+// Hard constraint: we only ever reply to / quote tweets younger than this.
+// Engaging a stale tweet reads as necro-posting and gets ~no reach, so a tweet
+// whose age we can't confirm is treated as too old and dropped.
+const MAX_TARGET_AGE_HOURS = Number(process.env['DASHBOARD_MAX_TARGET_AGE_HOURS'] ?? '') || 12;
 
 // ── payload types ────────────────────────────────────────────────────────────
 
@@ -95,37 +99,73 @@ interface RawSignal {
   mine: unknown;
 }
 
+/** Number of usable tweets in a raw twitter payload (bare array or {data:[...]} wrapper). */
+function signalCount(v: unknown): number {
+  return normalizeList(v).length;
+}
+
+/**
+ * One signal fetch with a retry and a last-good fallback. The twitter CLI
+ * fails transiently (rate limits, ClientTransaction init scrapes) and an
+ * empty feed silently zeroes out every reply/quote target downstream, so:
+ * retry once after a pause, and if both attempts come back empty, reuse the
+ * previous raw dump rather than proceeding with nothing. Raw dumps are only
+ * overwritten by non-empty fetches so the fallback is never clobbered.
+ */
+async function fetchSignal(key: keyof RawSignal, args: string[]): Promise<unknown> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let v: unknown = null;
+    try {
+      v = await twitter(args, 150_000);
+    } catch (e) {
+      console.error(`[pipeline] fetch ${key} crashed: ${e instanceof Error ? e.message : e}`);
+    }
+    if (signalCount(v) > 0) {
+      try {
+        writeJsonAtomic(join(RAW_DIR, `${key}.json`), v);
+      } catch {
+        // best-effort
+      }
+      return v;
+    }
+    if (attempt === 1) {
+      console.error(`[pipeline] fetch ${key} returned no items; retrying once...`);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+  const cached = readJson<unknown>(join(RAW_DIR, `${key}.json`), null);
+  const n = signalCount(cached);
+  if (n > 0) {
+    console.error(
+      `[pipeline] fetch ${key} empty after retry; falling back to last raw dump (${n} items)`,
+    );
+    return cached;
+  }
+  console.error(`[pipeline] fetch ${key} empty after retry and no raw fallback available`);
+  return [];
+}
+
 /** Parallel fetch of all relevant Twitter signal; raw dumps → data/raw/. */
 async function fetchAll(username: string): Promise<RawSignal> {
   // Larger pulls than the original 5-draft pipeline — we want enough feed
   // candidates to seed ~100 replies + ~100 quotes against real target ids.
   // The feed pull alone takes ~45-50s; give fetches a generous timeout so
   // they don't silently drop to zero candidates.
+  // NB: `favorites` in the twitter CLI is an alias for bookmarks; actual
+  // liked tweets come from `likes <handle>` (own likes only — X made likes
+  // private, but the pipeline only ever queries the user's own).
   const tasks: Array<[keyof RawSignal, string[]]> = [
     ['bookmarks', ['bookmarks', '-n', '80']],
-    ['favorites', ['favorites', '-n', '80']],
+    ['favorites', ['likes', `@${username}`, '-n', '80']],
     ['feed', ['feed', '-n', '500']],
     ['mine', ['user-posts', `@${username}`, '-n', '40']],
   ];
   const out: RawSignal = { bookmarks: [], favorites: [], feed: [], mine: [] };
   await Promise.all(
     tasks.map(async ([key, args]) => {
-      try {
-        out[key] = (await twitter(args, 150_000)) ?? [];
-      } catch (e) {
-        console.error(`[pipeline] fetch ${key} crashed: ${e instanceof Error ? e.message : e}`);
-        out[key] = [];
-      }
+      out[key] = await fetchSignal(key, args);
     }),
   );
-  // save raw for debugging
-  for (const [k, v] of Object.entries(out)) {
-    try {
-      writeJsonAtomic(join(RAW_DIR, `${k}.json`), v);
-    } catch {
-      // best-effort
-    }
-  }
   return out;
 }
 
@@ -194,6 +234,32 @@ export function loadHistory(mine?: NormalizedTweet[]): DraftHistory {
     }
   }
   return { post_texts: postTexts, reply_target_ids: replyTargetIds, quote_target_ids: quoteTargetIds };
+}
+
+/** Creation time of a tweet in epoch ms, or null if it can't be parsed. */
+export function tweetEpochMs(t: { createdAtISO?: string; time?: string }): number | null {
+  const raw = (t.createdAtISO || t.time || '').trim();
+  if (!raw) return null;
+  const ms = Date.parse(raw);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Keep only tweets younger than `maxHours` (measured from `now`). This is a
+ * HARD constraint for reply/quote targets: a tweet whose age can't be parsed is
+ * dropped rather than assumed fresh.
+ */
+export function filterFresh<T extends { createdAtISO?: string; time?: string }>(
+  items: T[],
+  now: number,
+  maxHours = MAX_TARGET_AGE_HOURS,
+): T[] {
+  const cutoffMs = maxHours * 3_600_000;
+  return items.filter((t) => {
+    const ms = tweetEpochMs(t);
+    if (ms === null) return false;
+    return now - ms <= cutoffMs;
+  });
 }
 
 /**
@@ -413,10 +479,19 @@ async function generateDrafts(
   }
 
   // replies + quotes — driven by feed targets (one draft per item).
+  // HARD constraint: only engage tweets younger than MAX_TARGET_AGE_HOURS.
   // Diversify by author cap so targets aren't dominated by 1-2 accounts, drop
   // anything already replied-to / quoted, then give replies and quotes
   // DIFFERENT orderings so they don't mirror each other's source posts.
-  const diverse = diversifyPool(pool, 2);
+  const now = Date.now();
+  const freshPool = filterFresh(pool, now);
+  if (freshPool.length < pool.length) {
+    console.log(
+      `[pipeline] reply/quote targets: ${freshPool.length}/${pool.length} within ` +
+        `${MAX_TARGET_AGE_HOURS}h (dropped ${pool.length - freshPool.length} stale)`,
+    );
+  }
+  const diverse = diversifyPool(freshPool, 2);
   const replyPool = diverse.filter((t) => !history.reply_target_ids.has(String(t.id)));
   let quotePool = diverse.filter((t) => !history.quote_target_ids.has(String(t.id)));
   quotePool = [...quotePool].reverse(); // quotes lead with different posts than replies
@@ -441,14 +516,17 @@ async function generateDrafts(
   let posts: PostDraft[] = [];
   let replies: TargetDraft[] = [];
   let quotes: TargetDraft[] = [];
-  const validIds = new Set(pool.map((t) => t.id));
+  // Reply/quote targets must be both real (in the pool) AND fresh — this is the
+  // gate that enforces the <MAX_TARGET_AGE_HOURS constraint even if the model
+  // echoes back an id that wasn't in its prompt.
+  const freshIds = new Set(freshPool.map((t) => t.id));
   for (const d of results) {
     posts.push(...coercePostDrafts(d['posts']));
     for (const r of coerceTargetDrafts(d['replies'])) {
-      if (validIds.has(String(r.target_id))) replies.push(r);
+      if (freshIds.has(String(r.target_id))) replies.push(r);
     }
     for (const q of coerceTargetDrafts(d['quotes'])) {
-      if (validIds.has(String(q.target_id))) quotes.push(q);
+      if (freshIds.has(String(q.target_id))) quotes.push(q);
     }
   }
 
